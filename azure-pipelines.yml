@@ -69,7 +69,48 @@ stages:
   displayName: 'Deploy to the dev environment'
   dependsOn: Build
   jobs:
+  - job: provision
+    displayName: 'Provision Azure App Service'
+    pool:
+      vmImage: 'ubuntu-18.04'
+    variables:
+    - group: Release
+    steps:
+    - script: |
+        # Exit when any command returns a failure status.
+        set -e
+
+        # Write terraform.tfvars
+        echo 'resource_group_location = "'$(ResourceGroupLocation)'"' | tee terraform.tfvars
+
+        # Write backend.tfvars
+        echo 'resource_group_name = "tf-storage-rg"' | tee backend.tfvars
+        echo 'storage_account_name = "'$(StorageAccountName)'"' | tee -a backend.tfvars
+        echo 'container_name = "tfstate"' | tee -a backend.tfvars
+        echo 'key = "terraform.tfstate"' | tee -a backend.tfvars
+
+        # Initialize terraform
+        terraform init -input=false -backend-config="backend.tfvars"
+
+        #Apply the terraform plan
+        terraform apply -input=false -auto-approve
+
+        #Get the app service name for the dev environment
+        WebAppNameDev=$(terraform output appservice_name_dev)
+
+        #Write the webappnamedev variable to the pipeline.
+        echo "##vso[task.setvariable variable=WebAppName;isOutput=true]$WebAppNameDev"
+      name: 'RunTerraForm'
+      displayName: 'Run Terraform'
+      env:
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_CLIENT_SECRET: $(ARM_CLIENT_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
   - deployment: Deploy
+    dependsOn: Provision
+    variables:
+      WebAppNameDev: $[ dependencies.Provision.outputs['RunTerraform.WebAppNameDev'] ]
     pool:
       vmImage: 'ubuntu-18.04'
     environment: dev
